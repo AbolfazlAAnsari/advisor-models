@@ -1,0 +1,32 @@
+"""
+uv run --isolated --extra vllm -m advisor_models.riddlebench.main_riddlebench
+"""
+
+import ray
+import hydra
+from omegaconf import DictConfig
+from skyrl_train.utils import initialize_ray
+from skyrl_train.entrypoints.main_base import BasePPOExp, config_dir, validate_cfg
+from skyrl_gym.envs import register
+
+
+@ray.remote(num_cpus=1)
+def skyrl_entrypoint(cfg: DictConfig):
+    register(
+        id="riddlebench",
+        entry_point="advisor_models.riddlebench.env:RiddleBenchEnv",
+    )
+
+    exp = BasePPOExp(cfg)
+    exp.run()
+
+
+@hydra.main(config_path=config_dir, config_name="ppo_base_config", version_base=None)
+def main(cfg: DictConfig) -> None:
+    validate_cfg(cfg)
+    initialize_ray(cfg)
+    ray.get(skyrl_entrypoint.remote(cfg))
+
+
+if __name__ == "__main__":
+    main()

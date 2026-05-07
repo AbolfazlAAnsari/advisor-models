@@ -10,6 +10,8 @@ from omegaconf import DictConfig
 from litellm import completion
 import os
 
+from .utils.tag_utils import extract_diagnosis, extract_advice
+
 # ENVIRONMENT VARIABLES
 ADVISOR_MODELS_MODE = os.environ.get("ADVISOR_MODELS_MODE", "advisor").lower()
 """Used to control the advisor models setting. Supported modes:
@@ -20,8 +22,29 @@ ADVISOR_MODELS_MODE = os.environ.get("ADVISOR_MODELS_MODE", "advisor").lower()
 STUDENT_MODEL = os.environ.get("STUDENT_MODEL", "gpt-4o-mini")
 """Used to set the student model. Overwritten if `model` is provided in dataset."""
 
+JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "gpt-4o-mini")
+"""Used to set the judge model for R_diag evaluation."""
+
 API_BASE = os.environ.get("API_BASE", None)
 """Used to set the API base URL."""
+
+DIAG_JUDGE_SYSTEM_PROMPT = (
+    "You are an evaluator of advisor feedback for problem-solving tasks. "
+    "Your task is to determine whether the advisor's diagnosis correctly "
+    "identifies the root cause of the student's error."
+)
+
+DIAG_JUDGE_PROMPT = """Problem: {problem}
+
+Student's incorrect answer: {initial_response}
+
+Correct answer: {ground_truth}
+
+Advisor's diagnosis: {diagnosis}
+
+Does the advisor's diagnosis correctly identify the root cause of the student's error?
+Briefly reason about whether the diagnosis accurately explains why the student failed, \
+then end your response with exactly CORRECT or INCORRECT."""
 
 
 class BaseAdvisorEnv(BaseTextEnv):
@@ -52,6 +75,7 @@ class BaseAdvisorEnv(BaseTextEnv):
         )
         assert "original_question" in extras
 
+        self.env_config = env_config
         self.ground_truth = extras["reward_spec"]["ground_truth"]
         self.original_question = extras["original_question"]
         self.original_response = extras.get("original_response", "")
@@ -63,6 +87,75 @@ class BaseAdvisorEnv(BaseTextEnv):
         self.student_prompt_to_log = None
         self.final_response = None
         self.reward_info = None
+
+    # ------------------------------------------------------------------
+    # Multi-component gated reward  (proposal §5.4)
+    # R_total = α·R_outcome + 1[R_outcome>0]·(β·R_diag + γ·R_adh)
+    # ------------------------------------------------------------------
+
+    def _compute_diag_reward(self, action: str) -> float:
+        """R_diag: LLM judge evaluating whether <diagnosis> correctly identifies the student's error.
+
+        Returns 1.0 if the judge deems the diagnosis accurate, 0.0 otherwise.
+        Returns 0.0 immediately if no diagnosis tag is present (no API call made).
+        """
+        diagnosis = extract_diagnosis(action)
+        if not diagnosis:
+            return 0.0
+        judge_prompt = DIAG_JUDGE_PROMPT.format(
+            problem=self.original_question,
+            initial_response=self.original_response,
+            ground_truth=self.ground_truth,
+            diagnosis=diagnosis,
+        )
+        try:
+            response = completion(
+                model=JUDGE_MODEL,
+                messages=[
+                    {"role": "system", "content": DIAG_JUDGE_SYSTEM_PROMPT},
+                    {"role": "user", "content": judge_prompt},
+                ],
+                temperature=0.0,
+                base_url=API_BASE,
+            )
+            judge_response = response.choices[0].message.content.strip()
+            return 1.0 if "CORRECT" in judge_response.upper() else 0.0
+        except Exception as e:
+            print(f"[BaseAdvisorEnv] R_diag judge call failed: {e}")
+            return 0.0
+
+    def _compute_adh_reward(self, action: str, student_response: str) -> float:
+        """R_adh: token-level F1 between <advice> content and the student's revised response.
+
+        F1 = 2·|overlap| / (|advice_tokens| + |response_tokens|)
+        Measures lexical overlap as a proxy for whether the student followed the advice.
+        """
+        advice = extract_advice(action)
+        if not advice or not student_response:
+            return 0.0
+        advice_tokens = set(advice.lower().split())
+        response_tokens = set(student_response.lower().split())
+        overlap = len(advice_tokens & response_tokens)
+        if overlap == 0:
+            return 0.0
+        return 2 * overlap / (len(advice_tokens) + len(response_tokens))
+
+    def _compute_total_reward(
+        self, r_outcome: float, r_diag: float, r_adh: float
+    ) -> float:
+        """Gated multi-component reward (proposal §5.4).
+
+        R_total = α·R_outcome + 1[R_outcome > 0]·(β·R_diag + γ·R_adh)
+
+        Weights read from env_config: outcome_weight (α=1.0), diag_weight (β=0.1),
+        adh_weight (γ=0.1). The gate ensures diagnosis/adherence credit is only
+        awarded when the advice actually produces a correct outcome.
+        """
+        alpha = self.env_config.get("outcome_weight", 1.0)
+        beta = self.env_config.get("diag_weight", 0.1)
+        gamma = self.env_config.get("adh_weight", 0.1)
+        gate = 1.0 if r_outcome > 0.0 else 0.0
+        return alpha * r_outcome + gate * (beta * r_diag + gamma * r_adh)
 
     def _build_baseline_prompt(
         self, prompt: List[Dict[str, str]]

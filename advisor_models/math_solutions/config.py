@@ -1,11 +1,14 @@
 """Configuration for math solutions domain.
 
+
 Contains system prompts, student personas, and reward functions for math solution writing.
 Defines different student preferences for solution style and evaluation criteria.
 """
 
 # Students with different solution style preferences (2x2 quadrant design)
 STUDENTS = ["Alex", "Blake", "Casey", "Dana"]
+
+
 
 # Student personas based on two binary axes:
 # Axis 1: Multiple solution methods (yes/no)

@@ -4,6 +4,7 @@ Provides MathSolutionsEnv class for math solution writing with advisor feedback.
 Evaluates generated solutions for style alignment.
 """
 
+import os
 from typing import Any, Dict, List, Tuple
 
 from omegaconf import DictConfig
@@ -71,9 +72,12 @@ class MathSolutionsEnv(BaseAdvisorEnv):
                 solution=self.final_response,
             )
 
-            client = OpenAI()
+            judge_model = os.environ.get("JUDGE_MODEL", "gpt-4o-mini")
+            api_base = os.environ.get("API_BASE", None)
+            api_key = os.environ.get("OPENAI_API_KEY", None)
+            client = OpenAI(base_url=api_base, api_key=api_key)
             response = client.chat.completions.create(
-                model="gpt-4.1-mini",
+                model=judge_model,
                 messages=[
                     {"role": "system", "content": STYLE_JUDGE_SYSTEM_PROMPT},
                     {"role": "user", "content": judge_prompt},

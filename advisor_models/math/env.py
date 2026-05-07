@@ -4,6 +4,7 @@ Provides MathEnv class for math problem solving with advisor feedback.
 Uses math_verify for answer extraction and verification.
 """
 
+import os
 from skyrl_gym.envs.base_text_env import BaseTextEnv, BaseTextEnvStepOutput
 from typing import Dict, Any, List
 from omegaconf import DictConfig
@@ -47,7 +48,9 @@ class MathEnv(BaseTextEnv):
     ) -> str:
         """Call the chat completion endpoint using OpenAI client."""
         try:
-            client = OpenAI()
+            api_base = os.environ.get("API_BASE", None)
+            api_key = os.environ.get("OPENAI_API_KEY", None)
+            client = OpenAI(base_url=api_base, api_key=api_key)
             response = client.chat.completions.create(
                 model=self.model,
                 messages=messages,

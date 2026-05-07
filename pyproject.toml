@@ -3,7 +3,7 @@ name = "advisor-models"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "datasets>=3.6.0",
     "dspy @ git+https://github.com/stanfordnlp/dspy.git@main",
@@ -19,6 +19,9 @@ dependencies = [
     "tqdm>=4.67.1",
     "wandb>=0.22.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["advisor_models*"]
 
 [dependency-groups]
 dev = [
