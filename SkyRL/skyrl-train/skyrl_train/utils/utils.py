@@ -399,7 +399,10 @@ def initialize_ray(cfg: DictConfig):
     )
 
     env_vars = prepare_runtime_environment(cfg)
-    ray.init(runtime_env={"env_vars": env_vars})
+    ray.init(
+        runtime_env={"env_vars": env_vars},
+        include_dashboard=False,
+    )
 
     # create the named ray actors for the registries to make available to all workers
     sync_registries()
