@@ -258,6 +258,9 @@ class FSDPStrategy(DistributedStrategy):
             full_state = actor_module.state_dict()
             apply_fsdp2(actor_module, fsdp_kwargs, self.fsdp_config)
             fsdp2_load_full_state_dict(actor_module, full_state, cpu_offload)
+            del full_state
+            gc.collect()
+            torch.cuda.empty_cache()
             fsdp_module = actor_module
         else:
             raise NotImplementedError(f"{self.fsdp_strategy} not implemented")
